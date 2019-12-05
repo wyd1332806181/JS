@@ -1,0 +1,586 @@
+<template>
+	<!-- 海报(想让海报显示隐藏要用hidden，v-if关闭后没办法在完整的出来海报) 保存海报按钮和关闭按钮 在html代码中写出来 绑定点击方法然后透明 再用canvas 覆盖 -->
+	<view class="canvas_box" :hidden="canvasFlag">
+		<view class="canvas_box_mask"></view><!-- 遮罩 -->
+		<icon type="cancel" class="canvas_close_btn" size="60" :style="{top:cancelTop+ 'rpx' }" @tap="canvasCancelEvn" color="transparent" /><!-- 关闭 -->
+		<view class="button-wrapper" :style="{width:boxWidth+'px',left:boxPageX+'px',top:btnTop + 'px'}" v-if="showCancelBtn">
+			<!-- 保存海报按钮 -->
+			<cover-view class="save_btn" @tap="saveCanvasImage">保存</cover-view>
+		</view>
+	</view>
+</template>
+
+<script>
+	import {
+		base64src
+	} from "../../util/util.js"
+	export default {
+		data() {
+			return {
+				boxPageY: 0,
+				boxPageX: 0,
+				titlePageY: 0,
+				pricePageY: 0,
+				remarkPageY: 0,
+				tagsPageY: 0,
+				linePageY: 0,
+				boxWidth: 0,
+				btnTop: 0,
+				cancelTop: 0,
+				showCancelBtn: false,
+				imgInfo: null
+			}
+		},
+		props: {
+			canvasFlag: {
+				type: Boolean,
+				default: true,
+			},
+			posterObj: {
+				type: Object,
+				default: {
+					url: '', //商品主图
+					title: '', //标题
+					remark: '', //描述
+					discountPrice: '', //折后价格
+					orignPrice: '', //原价
+					code: '', //小程序码
+					logoImg: '',
+					tags: []
+				}
+			}
+		},
+		methods: {
+			// 海报
+			// 画圆角矩形 ctx、x起点、y起点、w宽度、h高度、r圆角半径、fillColor填充颜色、strokeColor边框颜色
+			roundRect(ctx, x, y, w, h, r, fillColor, strokeColor, btn) {
+				// 开始绘制
+				ctx.beginPath()
+				// 绘制左上角圆弧 Math.PI = 180度
+				// 圆心x起点、圆心y起点、半径、以3点钟方向顺时针旋转后确认的起始弧度、以3点钟方向顺时针旋转后确认的终止弧度
+				ctx.arc(x + r, y + r, r, Math.PI, Math.PI * 1.5)
+				// 绘制border-top
+				// 移动起点位置 x终点、y终点
+				ctx.moveTo(x + r, y)
+				// 画一条线 x终点、y终点
+				ctx.lineTo(x + w - r, y)
+				// 绘制右上角圆弧
+				ctx.arc(x + w - r, y + r, r, Math.PI * 1.5, Math.PI * 2)
+				// 绘制border-right
+				ctx.lineTo(x + w, y + h - r)
+				// 绘制右下角圆弧
+				ctx.arc(x + w - r, y + h - r, r, 0, Math.PI * 0.5)
+
+				// 绘制左下角圆弧
+				ctx.arc(x + r, y + h - r, r, Math.PI * 0.5, Math.PI)
+
+				// 绘制border-left
+				ctx.lineTo(x, y + r)
+				if (btn == 'btn') {
+					const grd = ctx.createLinearGradient(0, 0, 200, 0) //渐变色
+					grd.addColorStop(0, fillColor)
+					grd.addColorStop(1, strokeColor)
+					// 因为边缘描边存在锯齿，最好指定使用 transparent 填充
+					ctx.setFillStyle(grd)
+					// 对绘画区域填充
+					ctx.fill()
+				} else {
+					if (fillColor) {
+						// 因为边缘描边存在锯齿，最好指定使用 transparent 填充
+						ctx.setFillStyle(fillColor)
+						// 对绘画区域填充
+						ctx.fill()
+					}
+					if (strokeColor) {
+						// 因为边缘描边存在锯齿，最好指定使用 transparent 填充
+						ctx.setStrokeStyle(strokeColor)
+						// 画出当前路径的边框
+						ctx.stroke()
+					}
+				}
+				// 关闭一个路径
+				ctx.closePath()
+				// 剪切，剪切之后的绘画绘制剪切区域内进行，需要save与restore 这个很重要 不然没办法保存
+				ctx.clip()
+			},
+
+			/**
+			 * canvas绘图相关，把文字转化成只能行数，多余显示省略号
+			 * ctx: 当前的canvas
+			 * text: 文本
+			 * contentWidth: 文本最大宽度
+			 * lineNumber: 显示几行
+			 */
+			canvasMultiLineText(ctx, text, contentWidth, lineNumber) {
+				var textArray = text.split(""); // 分割成字符串数组
+				var temp = "";
+				var row = [];
+				for (let i = 0; i < textArray.length; i++) {
+					if (ctx.measureText(temp).width < contentWidth) {
+						temp += textArray[i];
+					} else {
+						i--; // 这里添加i--是为了防止字符丢失
+						row.push(temp);
+						temp = "";
+					}
+				}
+				row.push(temp);
+
+				// 如果数组长度大于2，则截取前两个
+				if (row.length > lineNumber) {
+					var rowCut = row.slice(0, lineNumber);
+					var rowPart = rowCut[1];
+					var test = "";
+					var empty = [];
+					for (var a = 0; a < rowPart.length; a++) {
+						if (ctx.measureText(test).width < contentWidth) {
+							test += rowPart[a];
+						} else {
+							break;
+						}
+					}
+					empty.push(test); // 处理后面加省略号
+					var group = empty[0] + '...'
+					rowCut.splice(lineNumber - 1, 1, group);
+					row = rowCut;
+				}
+				return row;
+			},
+			//临时图片路径
+			getTempFile: function(ctx, url) {
+				wx.showLoading({});
+				let that = this;
+				
+				wx.getImageInfo({
+					src: url,
+					success(res) {
+						that.goodsInfoImg = res.path;
+						that.imgInfo = res;
+						//继续生成商品的小程序码
+						that.downloadSkuQrCode(ctx, that.posterObj.code);
+					},
+					fail() {
+						that.canvasCancelEvn();
+						uni.showToast({
+							title: '下载商品码失败,稍后重试！',
+							duration: 2000,
+							icon: 'none'
+						});
+					}
+				})
+			},
+			//下载小程序码
+			downloadSkuQrCode: function(ctx, url) {
+				let that = this;
+				wx.getImageInfo({
+					src: url,
+					success(res) {
+						that.qrCode = res.path;
+						wx.hideLoading();
+						that.createNewImg(ctx);
+					},
+					fail() {
+						that.canvasCancelEvn();
+						uni.showToast({
+							title: '下载商品码失败,稍后重试！',
+							duration: 2000,
+							icon: 'none'
+						});
+					}
+				})
+			},
+			/**
+			 * @function drawImage Canvas描绘图片
+			 * @param {String} imgPath 图片路径
+			 * @param {Number} imgWidth 图片宽度
+			 * @param {Number} imgHeight 图片高度
+			 * @param {Number} cWidth 放置图片宽度
+			 * @param {Number} cHeight 放置图片高度
+			 */
+			drawImage(ctx, imgPath, imgWidth, imgHeight, cWidth, cHeight) {
+				let dWidth = cWidth / imgWidth; // canvas与图片的宽度比例
+				let dHeight = cHeight / imgHeight; // canvas与图片的高度比例
+				if (imgWidth > cWidth && imgHeight > cHeight || imgWidth < cWidth && imgHeight < cHeight) {
+					if (dWidth > dHeight) {
+						ctx.drawImage(imgPath, 0, (imgHeight - cHeight / dWidth) / 2, imgWidth, cHeight / dWidth, this.boxPageX, this.boxPageY,
+							cWidth, cHeight)
+					} else {
+						ctx.drawImage(imgPath, (imgWidth - cWidth / dHeight) / 2, 0, cWidth / dHeight, imgHeight, this.boxPageX, this.boxPageY,
+							cWidth, cHeight)
+					}
+				} else {
+					if (imgWidth < cWidth) {
+						ctx.drawImage(imgPath, 0, (imgHeight - cHeight / dWidth) / 2, imgWidth, cHeight / dWidth, this.boxPageX, this.boxPageY,
+							cWidth, cHeight)
+					} else {
+						ctx.drawImage(imgPath, (imgWidth - cWidth / dHeight) / 2, 0, cWidth / dHeight, imgHeight, this.boxPageX, this.boxPageY,
+							cWidth, cHeight)
+					}
+				}
+			},
+			createCanvasImage() {
+				console.log(this.posterObj, 'posterObj')
+				let that = this;
+				const ctx = wx.createCanvasContext('myCanvas');
+				let phoneData = wx.getSystemInfoSync();
+				that.windowHeight = phoneData.windowHeight;
+				that.windowWidth = phoneData.windowWidth;
+
+				that.boxWidth = that.windowWidth * 0.86; //分享图片box宽度 333.75
+				that.boxHeight = that.windowWidth * 1.36; //分享图片box高度 491.25
+				that.boxPageX = (that.windowWidth - that.boxWidth) / 2; //左边文本图片X轴位置
+
+				that.contentX = that.boxPageX + 10;
+				that.contentWidth = that.boxWidth - 20;
+
+				if (!that.posterObj.remark) {
+					if (that.posterObj.tags.length > 0) {
+						let tagX = 0;
+						for (let i = 0; i < that.posterObj.tags.length; i++) {
+							let text = that.posterObj.tags[i];
+							ctx.setFontSize(12);
+							ctx.setFillStyle('#EA6572');
+							ctx.font = 'normal 12px sans-serif';
+							var boxWidth = ctx.measureText(text).width + 10;
+							if (i === 2 && that.contentX + tagX > that.contentWidth) {
+								that.boxHeight = that.windowWidth * 1.28;
+							} else {
+								that.boxHeight = that.windowWidth * 1.21;
+							}
+							ctx.draw(true)
+							tagX += boxWidth + 10;
+						}
+					} else {
+						that.boxHeight = that.windowWidth * 1.10;
+					}
+				}
+				if (that.posterObj.remark) {
+					if (that.posterObj.tags.length > 0) {
+						let tagX = 0;
+						for (let i = 0; i < that.posterObj.tags.length; i++) {
+							let text = that.posterObj.tags[i];
+							ctx.setFontSize(12);
+							ctx.setFillStyle('#EA6572');
+							ctx.font = 'normal 12px sans-serif';
+							var boxWidth = ctx.measureText(text).width + 10;
+							if (i === 2 && that.contentX + tagX > that.contentWidth) {
+								that.boxHeight = that.windowWidth * 1.36;
+							} else {
+								that.boxHeight = that.windowWidth * 1.30;
+							}
+							ctx.draw(true)
+							tagX += boxWidth + 10;
+						}
+					} else {
+						that.boxHeight = that.windowWidth * 1.20;
+					}
+				}
+				that.boxPageY = (that.windowHeight - that.boxHeight) / 2 - 32; //boxY轴位置61.5
+				that.imgWidth = that.windowWidth * 0.86; //商品图片宽度
+				that.imgHeight = that.windowWidth * 0.54; //商品图片高度
+				that.titlePageY = that.boxPageY + that.imgHeight + 35; //标题Y轴位置
+				that.codeWidth = that.windowWidth * 0.192; //小程序码图片宽度
+				that.codeHeight = that.windowWidth * 0.192; //小程序码图片高度
+				that.avaWidth = that.windowWidth * 0.128; //头像图片宽度
+				that.avaHeight = that.windowWidth * 0.128; //头像图片高度S
+				that.btnTop = (that.boxHeight + that.boxPageY + 30);
+				that.cancelTop = (that.boxPageY - 10);
+				
+				that.getTempFile(ctx, that.posterObj.url);
+			},
+			createNewImg(ctx) {
+				let that = this;
+
+				that.titleLineHeight = 22;
+				that.remarkLineHeight = 15;
+
+				ctx.draw() //清空原来的画图内容
+				ctx.save();
+				that.roundRect(ctx, that.boxPageX, that.boxPageY, that.boxWidth, that.boxHeight, 0, '#fff', '#fff'); //绘制海报圆角背景白色的
+				ctx.restore(); //恢复之前保存的绘图上下文 恢复之前保存的绘图上下午即状态 可以继续绘制
+
+				// 绘制商品图
+				ctx.save();
+				//覆盖绘制
+				//问题：在微信小程序使用canvas绘制圆角图片时，微信调试工具正常显示，android真机都不显示。
+				// 原因：因为ctx.clip()剪切区域使用的填充颜色是透明的，所以图片没出来。
+				// 解决方案：将剪切区域设置成实体颜色就好了。
+				that.roundRect(ctx, that.boxPageX, that.boxPageY, that.imgWidth, that.imgHeight, 0, '#f7f7f7', '#f7f7f7') //绘制图片圆角背景
+				// ctx.drawImage(that.goodsInfoImg, that.boxPageX, that.boxPageY, that.imgWidth, that.imgHeight); //绘制图
+				that.drawImage(ctx, that.goodsInfoImg, that.imgInfo.width, that.imgInfo.height, that.imgWidth, that.imgHeight);
+				ctx.restore(); //恢复之前保存的绘图上下文 恢复之前保存的绘图上下午即状态 可以继续绘制
+				ctx.draw(true)
+
+				// 海报商品title
+				ctx.setGlobalAlpha(1) //不透明
+				ctx.setFillStyle('#283540') //文字颜色：默认黑色
+				ctx.setFontSize(20) //设置字体大小，默认10
+				ctx.font = 'normal bold 20px sans-serif';
+				let titleRow = that.canvasMultiLineText(ctx, that.posterObj.title, that.contentWidth, 2); //计算绘制的2行文本
+
+				for (let b = 0; b < titleRow.length; b++) { //一行一行绘制文本
+					ctx.fillText(titleRow[b], that.contentX, that.titlePageY + that.titleLineHeight * b, that.contentWidth);
+					ctx.draw(true)
+				}
+				//绘制价格
+
+				that.pricePageY = that.titlePageY + that.titleLineHeight * 2 + 6;
+				ctx.setGlobalAlpha(1) //不透明
+				ctx.setFontSize(18) //设置字体大小，默认1
+				ctx.setFillStyle('#EA6572') //文字颜色：默认黑色
+				ctx.font = 'normal 18px sans-serif';
+				ctx.fillText(that.posterObj.discountPrice, that.contentX, that.pricePageY);
+				// 计算价格符号￥ + 价格文字宽度
+				let priceWidth = ctx.measureText(that.posterObj.discountPrice).width;
+				//有划线价，才展示
+				if (that.posterObj.orignPrice) {
+					// 填充划线价文字
+					ctx.setFillStyle("#666666");
+					ctx.font = "normal normal 13px sans-serif";
+					ctx.fillText('厂商指导价:' + that.posterObj.orignPrice, that.contentX + priceWidth + 1, that.pricePageY);
+				}
+				ctx.draw(true)
+				//绘制描述
+				let remarkRow = [];
+				that.remarkPageY = that.pricePageY;
+				that.tagHeight = 0;
+				if (that.posterObj.remark) {
+					that.remarkPageY = that.pricePageY + 22;
+					ctx.setGlobalAlpha(1) //不透明
+					ctx.setFillStyle('#999999') //文字颜色：默认黑色
+					ctx.setFontSize(13) //设置字体大小，默认10
+					ctx.font = 'normal normal 13px sans-serif';
+					remarkRow = that.canvasMultiLineText(ctx, that.posterObj.remark, that.contentWidth, 2); //计算绘制的2行文本
+					for (let b = 0; b < remarkRow.length; b++) { //一行一行绘制文本
+						ctx.fillText(remarkRow[b], that.contentX, that.remarkPageY + that.remarkLineHeight * b, that.contentWidth);
+						ctx.draw(true)
+					}
+				}
+				//绘制标签tagsPageY
+				let tagX = 0;
+				if (that.posterObj.remark) {
+					that.tagsPageY = that.remarkPageY + that.remarkLineHeight * 2;
+				} else {
+					that.tagsPageY = that.remarkPageY + 14;
+				}
+
+				if (that.posterObj.tags && that.posterObj.tags.length > 0) {
+					for (let i = 0; i < that.posterObj.tags.length; i++) {
+						let text = that.posterObj.tags[i];
+						ctx.setFontSize(12);
+						ctx.setFillStyle('#EA6572');
+						ctx.font = 'normal 12px sans-serif';
+						if (i === 2 && that.contentX + tagX > that.contentWidth) {
+							ctx.fillText(text, that.contentX + 5, that.tagsPageY + 45);
+							var boxWidth = ctx.measureText(text).width + 10;
+							ctx.save();
+							that.roundRect(ctx, that.contentX, that.tagsPageY + 30, boxWidth, 20, 0, 'transparent', '#EA6572');
+							ctx.restore();
+							that.tagHeight = i * 20 + 30;
+						} else {
+							ctx.fillText(text, that.contentX + tagX + 5, that.tagsPageY + 15);
+							var boxWidth = ctx.measureText(text).width + 10;
+							ctx.save();
+							that.roundRect(ctx, that.contentX + tagX, that.tagsPageY, boxWidth, 20, 0, 'transparent', '#EA6572');
+							ctx.restore();
+							that.tagHeight = 1 * 20 + 20;
+						}
+						ctx.draw(true)
+						tagX += boxWidth + 10;
+					}
+
+				}
+				console.log(that.tagHeight)
+				// 绘制横线
+				that.linePageY = that.tagsPageY + that.tagHeight;
+				ctx.save();
+				ctx.translate(0.5, 0.5);
+				ctx.lineWidth = 1;
+				ctx.beginPath();
+				ctx.moveTo(parseInt(that.contentX), parseInt(that.linePageY));
+				ctx.lineTo(parseInt(that.boxWidth + (that.boxPageX / 2)), parseInt(that.linePageY));
+				ctx.setStrokeStyle('#eee')
+				ctx.stroke();
+				ctx.restore();
+				ctx.draw(true)
+				ctx.closePath(); //关闭当前路径#F8F8F8
+
+				// 填充小程序码
+				ctx.drawImage(that.qrCode, that.contentX, that.linePageY + 15, that.codeWidth, that.codeHeight);
+				base64src(that.posterObj.logoImg, res => {
+					wx.getImageInfo({
+						src: res,
+						success(res) {
+							ctx.drawImage(res.path, that.boxWidth - 30, that.linePageY + 25, that.avaWidth, that.avaHeight)
+							ctx.draw(true)
+						},
+						fail(err) {
+							uni.showToast({
+								title: '下载logo失败，请稍后重试!',
+								duration: 2000,
+								icon: 'none'
+							});
+						}
+					})
+				});
+				// 填充长按立即购买文本
+				ctx.setFillStyle("#999999");
+				ctx.font = "normal normal 14px sans-serif";
+				ctx.fillText("长按识别小程序码", that.contentX + that.codeWidth + 10, that.linePageY + 43);
+				ctx.setFillStyle("#999999");
+				ctx.font = "normal normal 14px sans-serif";
+				ctx.fillText("查看详情", that.contentX + that.codeWidth + 10, that.linePageY + 63);
+
+				that.showCancelBtn = true;
+			},
+
+			// 保存到系统相册
+			saveCanvasImage() {
+				console.log('点击了保存')
+				wx.showLoading({ title: '保存中...' })
+				let _this = this;
+				// 1-把画布转化成临时文件
+				uni.canvasToTempFilePath({
+					x: _this.boxPageX,
+					y: _this.boxPageY,
+					width: _this.boxWidth, // 画布的宽
+					height: _this.boxHeight, // 画布的高
+					destWidth: _this.boxWidth * 5,
+					destHeight: _this.boxHeight * 5,
+					canvasId: 'myCanvas',
+					success(res) {
+						// 2-保存图片至相册
+						uni.saveImageToPhotosAlbum({
+							filePath: res.tempFilePath,
+							success(res2) {
+								wx.hideLoading();
+								uni.showToast({
+									title: '图片保存成功，可以去分享啦~',
+									duration: 2000
+								})
+								_this.canvasCancelEvn();
+							},
+							fail() {
+								uni.showToast({
+									title: '保存失败，稍后再试',
+									duration: 2000,
+									icon: 'none'
+								})
+								wx.hideLoading();
+							}
+						})
+					},
+					fail(err) {
+						wx.hideLoading();
+						if (err.errMsg === 'saveImageToPhotosAlbum:fail:auth denied' || err.errMsg ===
+							'saveImageToPhotosAlbum:fail auth deny' || err.errMsg ===
+							'saveImageToPhotosAlbum:fail authorize no response') {
+							// 这边微信做过调整，必须要在按钮中触发，因此需要在弹框回调中进行调用
+							uni.showModal({
+								title: '提示',
+								content: '需要您授权保存相册',
+								showCancel: false,
+								success: modalSuccess => {
+									uni.openSetting({
+										success(settingdata) {
+											console.log('settingdata', settingdata)
+											if (settingdata.authSetting['scope.writePhotosAlbum']) {
+												uni.showModal({
+													title: '提示',
+													content: '获取权限成功,再次点击按钮即可保存',
+													showCancel: false
+												})
+											} else {
+												uni.showModal({
+													title: '提示',
+													content: '获取权限失败，将无法保存到相册！',
+													showCancel: false
+												})
+											}
+										},
+										fail(failData) {
+											console.log('failData', failData)
+										},
+										complete(finishData) {
+											console.log('finishData', finishData)
+										}
+									})
+								}
+							})
+						}
+					}
+				})
+			},
+			// 取消海报
+			canvasCancelEvn() {
+				console.log()
+				this.$emit('cancel', true)
+			}
+		}
+	}
+</script>
+
+<style lang="scss">
+	.content {
+		text-align: center;
+		height: 100%;
+	}
+
+	.canvas_box {
+		.canvas_box_mask {
+			width: 100%;
+			height: 100%;
+			position: fixed;
+			top: 0;
+			right: 0;
+			bottom: 0;
+			left: 0;
+			background: rgba(0, 0, 0, 0.5);
+			z-index: 9;
+		}
+
+		.canvas {
+			position: fixed !important;
+			top: 0 !important;
+			left: 0 !important;
+			display: block !important;
+			width: 100% !important;
+			height: 100% !important;
+			z-index: 9;
+		}
+
+		.button-wrapper {
+			width: 87%;
+			height: 72rpx;
+			position: fixed;
+			bottom: 80rpx;
+			left: 50rpx;
+			background: linear-gradient(135deg, rgba(233, 212, 191, 1) 0%, rgba(180, 154, 131, 1) 100%);
+			border-radius: 4px;
+			z-index: 16;
+		}
+
+		.save_btn {
+			font-size: 30rpx;
+			line-height: 72rpx;
+			color: #fff;
+			width: 100%;
+			height: 100%;
+			text-align: center;
+			border-radius: 45rpx;
+			border-radius: 36rpx;
+			z-index: 10;
+		}
+
+		.canvas_close_btn {
+			background: url(../../static/mall/close-icon.png) center center no-repeat;
+			background-size: 100% 100%;
+			width: 45rpx;
+			position: fixed;
+			top: 42rpx;
+			right: 22rpx;
+			z-index: 999;
+			height: 45rpx;
+		}
+	}
+</style>
