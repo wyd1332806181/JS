@@ -1,0 +1,535 @@
+<template>
+	<!-- 海报(想让海报显示隐藏要用hidden，v-if关闭后没办法在完整的出来海报) 保存海报按钮和关闭按钮 在html代码中写出来 绑定点击方法然后透明 再用canvas 覆盖 -->
+	<view class="canvas_box" :hidden="canvasFlags" :catchtouchmove="true">
+		<view class="canvas_box_mask"></view><!-- 遮罩 -->
+		<view class="popupImg">
+			<image src="/static/login/icon_clear_phone.png" mode="" class="canvas_close_btn" @tap="canvasCancelEvn"></image>
+			<image :src="urlSrc" mode=""></image>
+			<view class="title" v-if="isSuccess">图片已保存在本地相册，可分享给好友</view>
+		</view>
+	</view>
+</template>
+
+<script>
+	export default {
+		data() {
+			return {
+				rpx: 0,
+				windowPageHeight: 0,
+				windowWidth: 0,
+				windowHeight: 0,
+				pageWidth: 0,
+				pageHeight: 0,
+				boxPageX: 0,
+				boxPageY: 0,
+				urlInfo: {},
+				urlHeight: 0,
+				titleY: 0,
+				urlSrc: '',
+				canvasFlags: true,
+				isSuccess:false
+			}
+		},
+		props: {
+			canvasFlag: {
+				type: Boolean,
+				default: true,
+			},
+			posterObj: {
+				type: Object,
+				default: {
+					url: '',
+					title: '',
+					remark: {
+						factoryDate: '',
+						city: '',
+						mileage: '',
+						standard: '',
+					},
+					price: '',
+					originPrice: '',
+					code: '',
+					tags: [],
+					isPreDate: '',
+					saleDate: ''
+				}
+			}
+		},
+		mounted() {
+			let phoneData = uni.getSystemInfoSync();
+			this.windowWidth = phoneData.windowWidth;
+			this.windowHeight = phoneData.windowHeight;
+
+			this.rpx = this.windowWidth / 375; // 设备比例
+			this.windowPageHeight = 667 * this.rpx; // 画布整体高度
+			this.pageWidth = 319 * this.rpx; // 画布背景内部矩形宽度
+			this.pageHeight = 524 * this.rpx; // 画布背景内部矩形高度
+			this.urlHeight = 190 * this.rpx; // 画布车辆主图高度
+
+		},
+		methods:{
+			createCanvasImage() {
+				uni.showLoading({
+					title: '生成图片中...'
+				})
+				let that = this;
+				const ctx = wx.createCanvasContext('myCanvas');
+			
+				// 绘制海报背景
+				ctx.save();
+				ctx.drawImage('/static/service/sharebg.png', 0, 0, this.windowWidth, this.windowPageHeight);
+				ctx.restore(); //恢复之前保存的绘图上下文 恢复之前保存的绘图上下午即状态 可以继续绘制
+				ctx.draw(true)
+			
+				ctx.save();
+				this.roundRect(ctx, 28 * this.rpx, 62 * this.rpx, this.pageWidth, this.pageHeight, 4, '#fff', '#fff'); //绘制海报圆角背景白色的
+				ctx.restore(); //恢复之前保存的绘图上下文 恢复之前保存的绘图上下午即状态 可以继续绘制
+			
+				this.drawUrlImg(ctx)
+			},
+			drawUrlImg(ctx) {
+				let that = this;
+				console.log(12)
+				uni.getImageInfo({
+					src: that.posterObj.url,
+					success(res) {
+						that.urlInfo = res;
+						ctx.save();
+						//覆盖绘制
+						//问题：在微信小程序使用canvas绘制圆角图片时，微信调试工具正常显示，android真机都不显示。
+						// 原因：因为ctx.clip()剪切区域使用的填充颜色是透明的，所以图片没出来。
+						// 解决方案：将剪切区域设置成实体颜色就好了。
+						ctx.drawImage(that.urlInfo.path, 28 * that.rpx, 62 * that.rpx, that.pageWidth, that.urlHeight, 0); //绘制图
+						ctx.restore(); //恢复之前保存的绘图上下文 恢复之前保存的绘图上下午即状态 可以继续绘制
+						ctx.draw(true)
+						that.drawPrice(ctx);
+					},
+					fail() {
+						that.canvasFlag = true;
+						uni.showToast({
+							title: '获取海报信息失败，请稍后重试...',
+							duration: 2000,
+							icon: 'none'
+						});
+					}
+				})
+			},
+			drawPrice(ctx) {
+				console.log(13)
+				if (this.posterObj.isPreDate == 'true') {
+					let saleDate = "预售日期：" + this.posterObj.saleDate;
+					ctx.setFillStyle('#FA5767');
+					ctx.setFontSize(20 * this.rpx);
+					ctx.fillText(saleDate, 42 * this.rpx, 266 * this.rpx + 20);
+				} else {
+					let priceArr = this.posterObj.price.split('.');
+					ctx.setFillStyle('#FA5767');
+					ctx.setFontSize(27 * this.rpx);
+					ctx.fillText(priceArr[0], 42 * this.rpx, 266 * this.rpx + 20); //此处比ui图多加20
+					let textWidth = ctx.measureText(priceArr[0]).width;
+					if (priceArr.length > 1) {
+						let p = "." + priceArr[1] + '万';
+						ctx.setFontSize(20 * this.rpx);
+						ctx.fillText(p, 42 * this.rpx + textWidth, 266 * this.rpx + 20);
+						textWidth = ctx.measureText(p).width + textWidth;
+					}
+					if (this.posterObj.originPrice) {
+						let o = "新车含税价：" + this.posterObj.originPrice + '万元';
+						ctx.setFontSize(14 * this.rpx);
+						ctx.fillText(o, 42 * this.rpx + textWidth + 20, 266 * this.rpx + 20);
+					}
+				}
+				this.drawContent(ctx);
+			},
+			drawContent(ctx) {
+				// 绘制标签
+				let titleY = 0;
+				let remarkStrY1 = 0;
+				let remarkStrY2 = 0;
+				if (this.posterObj.tags.length > 0) {
+					let tags = this.posterObj.tags;
+					// let tag = "比心认证";
+					let tagX = 0;
+					let tsgX2 = 0;
+					let color = "";
+					let bg = "";
+					for (let i = 0; i < tags.length; i++) {
+						let tag = tags[i];
+						if (i == 0) {
+							color = "#0274FF";
+							bg = "#E7F2FF";
+						} else {
+							color = "#FE900D";
+							bg = "#FFF4E7";
+						}
+						ctx.setFontSize(10 * this.rpx);
+						ctx.setFillStyle(color);
+						var tagWidth = ctx.measureText(tag).width + 8 * 2;
+						tagX += tagWidth + 8;
+			
+						if (43 * this.rpx + tagX > 283 * this.rpx) {
+							ctx.save();
+							this.roundRect(ctx, 43 * this.rpx, 302 * this.rpx + 28, tagWidth, 22 * this.rpx, 0, bg, bg); //绘制海报圆角背景白色的
+							ctx.restore();
+							ctx.fillText(tag, 43 * this.rpx + 8, 308 * this.rpx + 28 + 8);
+						} else {
+							ctx.save();
+							this.roundRect(ctx, tsgX2 + 43 * this.rpx, 302 * this.rpx, tagWidth, 22 * this.rpx, 0, bg, bg); //绘制海报圆角背景白色的
+							ctx.restore();
+							ctx.fillText(tag, tsgX2 + 43 * this.rpx + 8, 308 * this.rpx + 8);
+						}
+						tsgX2 += tagWidth + 8;
+					}
+					titleY = 336 * this.rpx + 20;
+					remarkStrY1 = 403 * this.rpx + 15;
+					remarkStrY2 = 433 * this.rpx + 15;
+					// let lastTagWidth = ctx.measureText(tags[tags.length-1]).width + 8 * 2;
+			
+					let row = Math.ceil(ctx.measureText(this.posterObj.title).width / (283* this.rpx));
+					var titleRow = row > 1 ? 2 : row;
+			
+					if (43 * this.rpx + tagX > 283 * this.rpx) {
+						titleY = 336 * this.rpx + 20 + 28; //此处比ui图多加20
+						if (titleRow == 1) {
+							remarkStrY1 = 403 * this.rpx + 15;
+							remarkStrY2 = 433 * this.rpx + 15;
+						} else {
+							remarkStrY1 = 403 * this.rpx + 15 + 28;
+							remarkStrY2 = 433 * this.rpx + 15 + 28;
+						}
+			
+					} else {
+						if (titleRow == 1) {
+							remarkStrY1 = 403 * this.rpx - 15;
+							remarkStrY2 = 433 * this.rpx - 15;
+						}
+					}
+				} else {
+					let row = Math.ceil(ctx.measureText(this.posterObj.title).width / 283);
+					var titleRow = row > 2 ? 2 : row;
+					if(titleRow == 1){
+						titleY = 336 * this.rpx - 20;
+						remarkStrY1 = 403 * this.rpx - 60;
+						remarkStrY2 = 433 * this.rpx - 60;
+					}else{
+						titleY = 336 * this.rpx - 20;
+						remarkStrY1 = 403 * this.rpx - 30;
+						remarkStrY2 = 433 * this.rpx - 30;
+					}
+				}
+				// 绘制title  str, ctx, initX, initY, lineHeight, maxWidth, color, size, row = 1
+				this.canvasTextAutoLine(this.posterObj.title, ctx, 42 * this.rpx, titleY, 26 * this.rpx, 283 * this.rpx, '#333333', 17 * this.rpx, 2);
+			
+				// 绘制信息
+				let timeStr = `上牌时间：${this.posterObj.remark.factoryDate}`;
+				ctx.setFillStyle('#666666');
+				ctx.setFontSize(14 * this.rpx);
+				let timeStrWidth = ctx.measureText(timeStr).width;
+				ctx.fillText(timeStr, 42 * this.rpx, remarkStrY1);
+				ctx.draw(true)
+			
+				let addrStr = `上牌地址：${this.posterObj.remark.city}`;
+				ctx.setFillStyle('#666666');
+				ctx.setFontSize(14 * this.rpx);
+				let addrStrWidth = ctx.measureText(addrStr).width;
+				ctx.fillText(addrStr, 42 * this.rpx + 25 + timeStrWidth, remarkStrY1);
+				ctx.draw(true)
+			
+				let mileageStr = `表显里程：${this.posterObj.remark.mileage}万公里`;
+				ctx.setFillStyle('#666666');
+				ctx.setFontSize(14 * this.rpx);
+				let mileageStrWidth = ctx.measureText(mileageStr).width;
+				ctx.fillText(mileageStr, 42 * this.rpx, remarkStrY2);
+				ctx.draw(true)
+			
+				let standardStr = `排放标准：${this.posterObj.remark.standard}`;
+				ctx.setFillStyle('#666666');
+				ctx.setFontSize(14 * this.rpx);
+				let standardStrWidth = ctx.measureText(standardStr).width;
+				ctx.fillText(standardStr, 42 * this.rpx + 25 + timeStrWidth, remarkStrY2);
+				ctx.draw(true)
+				
+				this.drawBegin(ctx);
+			},
+			
+			drawCodeImg(ctx) {
+				let that = this;
+				console.log(11)
+				uni.getImageInfo({
+					src: that.posterObj.code,
+					success(res) {
+						ctx.drawImage(res.path, 64 * that.rpx, 488 * that.rpx + 10, 80 * that.rpx, 80 * that.rpx)
+						ctx.draw(true,() => {
+							console.log('true')
+							// that.toTempFilePath();
+							setTimeout(() => {
+								console.log('true1')
+								uni.canvasToTempFilePath({
+									canvasId: 'myCanvas',
+									x: 0,
+									y: 0,
+									width: that.windowWidth,
+									height: that.windowPageHeight,
+									success(res) {
+										that.canvasFlags = false;
+										that.urlSrc = res.tempFilePath;
+										setTimeout(function() {
+											that.savePicToAlbum(res.tempFilePath);
+										}, 1000)
+									}
+								})
+							},600)
+						})
+						
+					},
+					fail(err) {
+						that.canvasFlag = true;
+						uni.showToast({
+							title: '获取海报信息失败，请稍后重试...',
+							duration: 2000,
+							icon: 'none'
+						});
+					}
+				})
+			},
+			drawBegin(ctx) {
+				let that = this;
+				// 填充小程序文本
+				ctx.setFillStyle("#333333");
+				ctx.setFontSize(16 * that.rpx)
+				ctx.fillText("宝利德比心小程序", 168 * that.rpx, 508 * that.rpx + 20);
+				ctx.setFillStyle("#999999");
+				ctx.setFontSize(12 * that.rpx)
+				ctx.fillText("查看详情", 168 * that.rpx, 536 * that.rpx + 20);
+				that.drawCodeImg(ctx);
+			},
+			toTempFilePath(){
+				let that = this;
+				setTimeout(function() {
+					wx.canvasToTempFilePath({
+						canvasId: 'myCanvas',
+						x: 0,
+						y: 0,
+						width: that.windowWidth,
+						height: that.windowPageHeight,
+						destWidth: that.windowWidth * 5,
+						destHeight: that.windowPageHeight * 5,
+						quality: 1,
+						success: function(res) {
+							uni.hideLoading();
+							// 保存在本地相册
+							console.log(res)
+							that.canvasFlags = false;
+							that.urlSrc = res.tempFilePath;
+							setTimeout(function() {
+								that.savePicToAlbum(res.tempFilePath);
+							}, 1000)
+						},
+						fail: function(res) {
+							uni.hideLoading();
+							uni.showToast({
+								title: '保存失败，稍后再试',
+								duration: 2000,
+								icon: 'none'
+							})
+						}
+					})
+				}, 1000)
+			},
+			savePicToAlbum(tempFilePath) {
+				let that = this;
+				uni.saveImageToPhotosAlbum({
+					filePath: tempFilePath,
+					success(res2) {
+						uni.hideLoading();
+						that.canvasFlags = false;
+						that.isSuccess = true;
+					},
+					fail(err) {
+						uni.hideLoading();
+						that.isSuccess = false;
+						// that.canvasFlags = true;
+						if (err.errMsg === 'saveImageToPhotosAlbum:fail:auth denied' || err.errMsg ===
+							'saveImageToPhotosAlbum:fail auth deny' || err.errMsg ===
+							'saveImageToPhotosAlbum:fail authorize no response') {
+							// 这边微信做过调整，必须要在按钮中触发，因此需要在弹框回调中进行调用
+							uni.showModal({
+								title: '提示',
+								content: '需要您授权保存相册',
+								showCancel: false,
+								success: modalSuccess => {
+									uni.openSetting({
+										success(settingdata) {
+											if (settingdata.authSetting['scope.writePhotosAlbum']) {
+												uni.showModal({
+													title: '提示',
+													content: '获取权限成功,请关闭海报再次点击分享生成朋友圈海报即可保存',
+													showCancel: false
+												})
+											} else {
+												uni.showModal({
+													title: '提示',
+													content: '获取权限失败，将无法保存到相册！',
+													showCancel: false
+												})
+											}
+										},
+										fail(failData) {
+											console.log('failData', failData)
+										},
+										complete(finishData) {
+											console.log('finishData', finishData)
+										}
+									})
+								}
+							})
+						}
+					}
+				})
+			},
+			/*
+			  *  绘制多行文本，自动换行，超出添加...
+			  *
+			  str:要绘制的字符串
+			  canvas:canvas对象
+			  initX:绘制字符串起始x坐标
+			  initY:绘制字符串起始y坐标
+			  lineHeight:字行高，自己定义个值即可
+			  maxWidth: 文本最大宽度
+			  row: 最大行数
+			 */
+			canvasTextAutoLine: function(str, ctx, initX, initY, lineHeight, maxWidth, color, size, row = 1) {
+				var lineWidth = 0;
+				var lastSubStrIndex = 0;
+				var currentRow = 1;
+				ctx.setFillStyle(color);
+				ctx.setFontSize(size);
+				for (let i = 0; i < str.length; i++) {
+					// console.log(ctx.measureText(str[i]).width)
+					lineWidth += ctx.measureText(str[i]).width;
+					if (lineWidth > maxWidth) {
+						currentRow++;
+						console.log(currentRow)
+						let newStr = str.substring(lastSubStrIndex, i)
+						if (currentRow > row && str.length > i) {
+							newStr = str.substring(lastSubStrIndex, i - 2) + '...'
+						}
+						ctx.fillText(newStr, initX, initY);
+						ctx.draw(true)
+						initY += lineHeight;
+						lineWidth = 0;
+						lastSubStrIndex = i;
+			
+						if (currentRow > row) {
+							break;
+						}
+					}
+					if (i == str.length - 1) {
+						ctx.fillText(str.substring(lastSubStrIndex, i + 1), initX, initY);
+						ctx.draw(true)
+					}
+				}
+			},
+			// 画圆角矩形 ctx、x起点、y起点、w宽度、h高度、r圆角半径、fillColor填充颜色、strokeColor边框颜色
+			roundRect(ctx, x, y, w, h, r, fillColor, strokeColor, btn) {
+				// 开始绘制
+				ctx.beginPath()
+				// 绘制左上角圆弧 Math.PI = 180度
+				// 圆心x起点、圆心y起点、半径、以3点钟方向顺时针旋转后确认的起始弧度、以3点钟方向顺时针旋转后确认的终止弧度
+				ctx.arc(x + r, y + r, r, Math.PI, Math.PI * 1.5)
+				// 绘制border-top
+				// 移动起点位置 x终点、y终点
+				ctx.moveTo(x + r, y)
+				// 画一条线 x终点、y终点
+				ctx.lineTo(x + w - r, y)
+				// 绘制右上角圆弧
+				ctx.arc(x + w - r, y + r, r, Math.PI * 1.5, Math.PI * 2)
+				// 绘制border-right
+				ctx.lineTo(x + w, y + h - r)
+				// 绘制右下角圆弧
+				ctx.arc(x + w - r, y + h - r, r, 0, Math.PI * 0.5)
+				// 绘制左下角圆弧
+				ctx.arc(x + r, y + h - r, r, Math.PI * 0.5, Math.PI)
+				// 绘制border-left
+				ctx.lineTo(x, y + r)
+				if (btn == 'btn') {
+					const grd = ctx.createLinearGradient(0, 0, 200, 0) //渐变色
+					grd.addColorStop(0, fillColor)
+					grd.addColorStop(1, strokeColor)
+					// 因为边缘描边存在锯齿，最好指定使用 transparent 填充
+					ctx.setFillStyle(grd)
+					// 对绘画区域填充
+					ctx.fill()
+				} else {
+					if (fillColor) {
+						// 因为边缘描边存在锯齿，最好指定使用 transparent 填充
+						ctx.setFillStyle(fillColor)
+						// 对绘画区域填充
+						ctx.fill()
+					}
+					if (strokeColor) {
+						// 因为边缘描边存在锯齿，最好指定使用 transparent 填充
+						ctx.setStrokeStyle(strokeColor)
+						// 画出当前路径的边框
+						ctx.stroke()
+					}
+				}
+				// 关闭一个路径
+				ctx.closePath()
+				// 剪切，剪切之后的绘画绘制剪切区域内进行，需要save与restore 这个很重要 不然没办法保存
+				ctx.clip()
+			},
+			// 取消海报
+			canvasCancelEvn() {
+				this.$emit('cancel', true)
+				this.canvasFlags = true;
+			},
+			
+		}
+	}
+</script>
+
+<style lang="scss">
+	.canvas_box {
+		.canvas_box_mask {
+			width: 100%;
+			height: 100%;
+			position: fixed;
+			top: 0;
+			right: 0;
+			bottom: 0;
+			left: 0;
+			background: rgba(0, 0, 0, 0.5);
+			z-index: 9;
+		}
+
+		.popupImg {
+			width: 556upx;
+			height: 988upx;
+			position: fixed;
+			top: 50%;
+			left: 50%;
+			transform: translate(-50%, -50%);
+			z-index: 12;
+
+			image {
+				width: 100%;
+				height: 100%;
+			}
+
+			.title {
+				color: #FFFFFF;
+				margin-top: 24upx;
+				text-align: center;
+			}
+
+			.canvas_close_btn {
+				width: 48upx;
+				height: 48upx;
+				position: absolute;
+				top: 20upx;
+				right: 20upx;
+			}
+		}
+	}
+</style>
