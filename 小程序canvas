@@ -1,0 +1,344 @@
+<template>
+	<!--  :hidden="isPoster" -->
+	<view :catchtouchmove="true" class="poster-container" :hidden="isPoster">
+		<view class="poster-mask"></view>
+		<view class="poster-box">
+			<image class="close-icon" src="/static/login/icon_clear_phone.png" mode="" @click="closePoster"></image>
+			<image class="poster-imgimg" :src="posterImgPath" mode=""></image>
+			<view class="title">图片已保存在本地相册，可分享给好友</view>
+		</view>
+		<canvas canvas-id="myCanvas1" class="myCanvas"></canvas>
+	</view>
+</template>
+
+<script>
+	export default {
+		data() {
+			return {
+				posterImgPath: 'https://bld-erp-pic.oss-cn-shanghai.aliyuncs.com/usedCarFitment/banner/4843768182169045.png',
+				rpx: 1,
+				canvasWidth: 0,
+				canvasHeight: 0,
+				pageWidth: 0,
+				pageHeight: 0,
+				mainImageHeight: 0,
+				tagHeight: 0,
+				titleY:0
+			}
+		},
+		props:{
+			isPoster:{
+				type:Boolean,
+				default:true
+			}
+		},
+		created() {
+			let res = uni.getSystemInfoSync();
+			this.rpx = res.windowWidth / 375; // 设备比例
+			this.canvasWidth = res.windowWidth;
+			this.canvasHeight = 667 * this.rpx - 44 - 20;
+			
+			this.pageWidth = 319 * this.rpx;
+			this.pageHeight = 544 * this.rpx - 44 - 20 ;  //分别减去导航高度
+			
+			this.mainImageHeight = 190 *  this.rpx;
+			
+			
+		},
+		methods:{
+			sharePosteCanvas(){
+				let that = this;
+				uni.showLoading({
+					title: '海报生成中...',
+					mask: true,
+				});
+				const ctx = uni.createCanvasContext("myCanvas1",that);
+				
+				
+				// 绘制海报背景
+				ctx.save();
+				ctx.drawImage('/static/service/sharebg.png', 0, 0, that.canvasWidth, that.canvasHeight);
+				ctx.restore(); //恢复之前保存的绘图上下文 恢复之前保存的绘图上下午即状态 可以继续绘制
+				ctx.draw(true)
+			
+				ctx.save();
+				that.roundRect(ctx, 28 * that.rpx, 62 * that.rpx - 6, that.pageWidth, that.pageHeight, 4, '#c2c2a3', '#c2c2a3'); //绘制海报圆角背景白色的
+				ctx.restore(); //恢复之前保存的绘图上下文 恢复之前保存的绘图上下午即状态 可以继续绘制
+				ctx.draw(true)
+				
+				that.drawMianImage(ctx);
+				
+				uni.hideLoading();
+			},
+			drawMianImage(ctx){
+				let that = this;
+				uni.getImageInfo({
+					src: "https://bld-erp-pic.oss-cn-shanghai.aliyuncs.com/y/claim/4699490119157172.jpg",
+					success(res) {
+						ctx.save();
+						ctx.drawImage(res.path, 28 * that.rpx, 62 * that.rpx - 6, that.pageWidth, that.mainImageHeight);
+						ctx.restore(); //恢复之前保存的绘图上下文 恢复之前保存的绘图上下午即状态 可以继续绘制
+						ctx.draw(true);
+						that.drawPrice(ctx);
+					}
+				})
+			},
+			drawPrice(ctx){
+				let that = this;
+				
+				let price = "34.88";
+				let price1 = price.split(".");
+				
+				ctx.setFillStyle('#FA5767');
+				ctx.setFontSize(27 * that.rpx);
+				ctx.fillText(price1[0], 42 * that.rpx, 266 * that.rpx + 14); //此处比ui图多加14
+				
+				let price1Width = ctx.measureText(price1[0]).width;
+				if(price1.length > 1){
+					let price2 =  '.' + price1[1] + '万';
+					ctx.setFillStyle('#FA5767');
+					ctx.setFontSize(20 * that.rpx);
+					ctx.fillText(price2, 42 * that.rpx + price1Width, 266 * that.rpx + 14); //此处比ui图多加14
+					price1Width = ctx.measureText(price2).width + price1Width;
+				}
+				let originPrice = "85.8";
+				let originPriceText = "新车含税价：" + originPrice + "万元";
+				ctx.setFillStyle('#FA5767');
+				ctx.setFontSize(14 * that.rpx);
+				ctx.fillText(originPriceText, 42 * that.rpx + 21 + price1Width, 266 * that.rpx + 14); //此处比ui图多加14
+				ctx.draw(true);
+				that.drawTags(ctx);
+			},
+			drawTags(ctx){
+				let that = this;
+				let tags = [];
+				let boxWidth = 283 * that.rpx;
+				let tagTotalWidth = 0;
+				let tagX = 43 * that.rpx;
+				let tagY = 302 * that.rpx - 10;
+				let textY = 308 * that.rpx - 10 + 6 + 3;
+				let currentRow = 1;
+				ctx.setFontSize(10 * that.rpx);
+				ctx.setFillStyle("#0274FF");
+				
+				for (let i = 0; i < tags.length; i++) {
+					let tag = tags[i];
+					let width = ctx.measureText(tag).width + 8 * 2;
+					tagTotalWidth += width + 8;
+					if(tagTotalWidth > boxWidth){
+						tagX = 43 * that.rpx;
+						tagTotalWidth = 0;
+						if(tagTotalWidth === 0){
+							let width1 = ctx.measureText(tag).width + 8 * 2;
+							tagTotalWidth += width1 + 8;
+						}
+						tagY += 20 + 10;
+						textY += 20 + 10;
+						currentRow++;
+					}
+					ctx.save();
+					that.roundRect(ctx,  tagX, tagY, width, 22 * that.rpx, 0, "#E7F2FF", "#E7F2FF"); //绘制海报圆角背景白色
+					ctx.restore();
+					ctx.fillText(tag, tagX + 8, textY);
+					tagX += width + 8;
+				}
+				ctx.draw(true);
+				if(tags.length > 0){
+					that.tagHeight = currentRow * (20 + 10);
+				}
+				
+				that.drawTitle(ctx);
+				console.log(this.tagHeight)
+			},
+			drawTitle(ctx){
+				let that = this;
+				let title = "【杭州】保时捷718 2016款 豪华版豪华版 Boxster 2.0T  2016款 豪华版豪华版 Boxster 2.0T  2016款 豪华版豪华版 Boxster 2.0T  2016款 豪华版豪华版 Boxster 2.0T  2016款";
+				this.titileY = 336 * that.rpx - 25 + that.tagHeight;
+				
+				that.canvasTextAutoLine(title, ctx, 43 * that.rpx, this.titileY, 26 * that.rpx, 283 * that.rpx, "#333333", 17 * that.rpx, 2);
+				
+				let row = Math.ceil(ctx.measureText(title).width / (283 * that.rpx));
+				let titleRow = row > 1 ? 2 : row;
+				console.log(titleRow)
+				
+				let remarkY = this.titileY + 16;
+				let remark1Y = remarkY + 16*2;
+				if(titleRow > 1){
+					remarkY = this.titileY + 16 + 26 * that.rpx + 16;
+					remark1Y = remarkY + 16*2;
+				}
+				
+				let remark1 = "上牌时间：2016年10月";
+				let remark2 = "上牌地址：杭州";
+				let remark3 = "表显里程：8.32万公里";
+				let remark4 = "排放标准：国V";
+				
+				ctx.setFillStyle('#666666');
+				ctx.setFontSize(14 * this.rpx);
+				let remark1Width = ctx.measureText(remark1).width;
+				ctx.fillText(remark1, 42 * this.rpx, remarkY);
+				
+				ctx.setFillStyle('#666666');
+				ctx.setFontSize(14 * this.rpx);
+				ctx.fillText(remark2, 42 * this.rpx + remark1Width + 25, remarkY);
+				
+				ctx.setFillStyle('#666666');
+				ctx.setFontSize(14 * this.rpx);
+				let remark3Width = ctx.measureText(remark3).width;
+				ctx.fillText(remark3, 42 * this.rpx, remark1Y);
+				
+				ctx.setFillStyle('#666666');
+				ctx.setFontSize(14 * this.rpx);
+				ctx.fillText(remark4, 42 * this.rpx + remark1Width + 25, remark1Y);
+				
+				ctx.draw(true)
+				
+			},
+			// 关闭海报
+			closePoster(){
+				this.$emit('cancleWmPoster', true)
+			},
+			// 画圆角矩形 ctx、x起点、y起点、w宽度、h高度、r圆角半径、fillColor填充颜色、strokeColor边框颜色
+			roundRect(ctx, x, y, w, h, r, fillColor, strokeColor, btn) {
+				// 开始绘制
+				ctx.beginPath()
+				// 绘制左上角圆弧 Math.PI = 180度
+				// 圆心x起点、圆心y起点、半径、以3点钟方向顺时针旋转后确认的起始弧度、以3点钟方向顺时针旋转后确认的终止弧度
+				ctx.arc(x + r, y + r, r, Math.PI, Math.PI * 1.5)
+				// 绘制border-top
+				// 移动起点位置 x终点、y终点
+				ctx.moveTo(x + r, y)
+				// 画一条线 x终点、y终点
+				ctx.lineTo(x + w - r, y)
+				// 绘制右上角圆弧
+				ctx.arc(x + w - r, y + r, r, Math.PI * 1.5, Math.PI * 2)
+				// 绘制border-right
+				ctx.lineTo(x + w, y + h - r)
+				// 绘制右下角圆弧
+				ctx.arc(x + w - r, y + h - r, r, 0, Math.PI * 0.5)
+				// 绘制左下角圆弧
+				ctx.arc(x + r, y + h - r, r, Math.PI * 0.5, Math.PI)
+				// 绘制border-left
+				ctx.lineTo(x, y + r)
+				if (btn == 'btn') {
+					const grd = ctx.createLinearGradient(0, 0, 200, 0) //渐变色
+					grd.addColorStop(0, fillColor)
+					grd.addColorStop(1, strokeColor)
+					// 因为边缘描边存在锯齿，最好指定使用 transparent 填充
+					ctx.setFillStyle(grd)
+					// 对绘画区域填充
+					ctx.fill()
+				} else {
+					if (fillColor) {
+						// 因为边缘描边存在锯齿，最好指定使用 transparent 填充
+						ctx.setFillStyle(fillColor)
+						// 对绘画区域填充
+						ctx.fill()
+					}
+					if (strokeColor) {
+						// 因为边缘描边存在锯齿，最好指定使用 transparent 填充
+						ctx.setStrokeStyle(strokeColor)
+						// 画出当前路径的边框
+						ctx.stroke()
+					}
+				}
+				// 关闭一个路径
+				ctx.closePath()
+				// 剪切，剪切之后的绘画绘制剪切区域内进行，需要save与restore 这个很重要 不然没办法保存
+				ctx.clip()
+			},
+			/*
+			  *  绘制多行文本，自动换行，超出添加...
+			  *
+			  str:要绘制的字符串
+			  canvas:canvas对象
+			  initX:绘制字符串起始x坐标
+			  initY:绘制字符串起始y坐标
+			  lineHeight:字行高，自己定义个值即可
+			  maxWidth: 文本最大宽度
+			  row: 最大行数
+			 */
+			canvasTextAutoLine: function(str, ctx, initX, initY, lineHeight, maxWidth, color, size, row = 1) {
+				var lineWidth = 0;
+				var lastSubStrIndex = 0;
+				var currentRow = 1;
+				ctx.setFillStyle(color);
+				ctx.setFontSize(size);
+				for (let i = 0; i < str.length; i++) {
+					// console.log(ctx.measureText(str[i]).width)
+					lineWidth += ctx.measureText(str[i]).width;
+					if (lineWidth > maxWidth) {
+						currentRow++;
+						console.log(currentRow)
+						let newStr = str.substring(lastSubStrIndex, i)
+						if (currentRow > row && str.length > i) {
+							newStr = str.substring(lastSubStrIndex, i - 2) + '...'
+						}
+						ctx.fillText(newStr, initX, initY);
+						ctx.draw(true)
+						initY += lineHeight;
+						lineWidth = 0;
+						lastSubStrIndex = i;
+			
+						if (currentRow > row) {
+							break;
+						}
+					}
+					if (i == str.length - 1) {
+						ctx.fillText(str.substring(lastSubStrIndex, i + 1), initX, initY);
+						ctx.draw(true)
+					}
+				}
+			},
+		}
+	}
+</script>
+
+<style lang="scss">
+	.poster-container{
+		.poster-mask{
+			background: rgba(0,0,0,0.5);
+			position: fixed;
+			top: 0;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			z-index: 6;
+		}
+		.poster-box{
+			width: 556upx;
+			height: 988upx;
+			position: fixed;
+			top: 50%;
+			left: 50%;
+			transform: translate(-50%, -50%);
+			z-index: 12;
+			.close-icon{
+				width: 48upx;
+				height: 48upx;
+				position: absolute;
+				top: 20upx;
+				right: 20upx;
+			}
+			.poster-imgimg{
+				width: 100%;
+				height: 100%;
+			}
+			.title{
+				margin-top: 24upx;
+				text-align: center;
+				color: #FFFFFF;
+			}
+		}
+		.myCanvas{
+			position: fixed;
+			top: 0;
+			left: 0;
+			// background: #FFFFFF;
+			z-index: 14;
+			width: 100%;
+			height: 100%;
+
+		}
+	}
+</style>
